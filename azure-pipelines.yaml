@@ -1,0 +1,152 @@
+# azure-pipelines.yml (BACKEND - fixed: explicit container name 'auth-api')
+trigger:
+- develop
+pr: none
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  # Registry / image
+  acrLoginServer: 'finlyticsregistry.azurecr.io'
+  acrUser: 'FinlyticsRegistry'
+  imageRepository: 'auth-api'
+  dockerfilePath: 'dev.DockerFile'
+  buildContext: '.'
+  imageTag: '$(Build.BuildId)'
+
+  # Azure / AKS
+  resourceGroup: 'Finlytics'
+  aksCluster: 'Finlytics-Cluster'
+  k8sNamespace: 'default'
+  subscriptionId: '39b5a371-1d5a-4704-9ba6-f7b431ac6725'
+
+  # Names
+  deploymentName: 'auth-api-v2'
+  serviceName: 'auth-api-v2'
+
+stages:
+- stage: BuildAndPush
+  displayName: Build and Push
+  jobs:
+  - job: BuildPush
+    steps:
+    - checkout: self
+
+    - script: |
+        set -e
+        docker --version
+        docker info --format '{{.OSType}}' | xargs echo "Docker is running in container mode:"
+      displayName: 'Docker info'
+
+    - script: |
+        set -e
+        echo "$acrPassword" | docker login "$acrLoginServer" --username "$acrUser" --password-stdin
+
+        docker build \
+          -f "$dockerfilePath" \
+          -t "$acrLoginServer/$imageRepository:latest" \
+          -t "$acrLoginServer/$imageRepository:$imageTag" \
+          "$buildContext"
+
+        docker push "$acrLoginServer/$imageRepository:latest"
+        docker push "$acrLoginServer/$imageRepository:$imageTag"
+
+        docker logout "$acrLoginServer"
+      displayName: 'Build & Push to ACR'
+      env:
+        acrLoginServer: $(acrLoginServer)
+        acrUser: $(acrUser)
+        acrPassword: $(acrPassword)
+        dockerfilePath: $(dockerfilePath)
+        imageRepository: $(imageRepository)
+        imageTag: $(imageTag)
+        buildContext: $(buildContext)
+
+- stage: Deploy
+  displayName: Deploy to AKS
+  dependsOn: BuildAndPush
+  jobs:
+  - job: Apply
+    displayName: Create/Update K8s resources (auth-api-v2)
+    steps:
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: 'Create/Update deployment & ClusterIP service (backend)'
+      inputs:
+        azureSubscription: 'Finlytics-RM'
+        addSpnToEnvironment: true
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -e
+          az account set --subscription "$(subscriptionId)"
+
+          img="$(acrLoginServer)/$(imageRepository):$(Build.BuildId)"
+          ns="$(k8sNamespace)"
+          dep="$(deploymentName)"
+          svc="$(serviceName)"
+
+          # 1) Create the deployment only if it does not exist (avoid overwriting container name)
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command \
+            "kubectl get deploy $dep -n $ns >/dev/null 2>&1 || kubectl create deployment $dep --image=$img -n $ns --port=3000"
+
+          # 2) Explicitly set image for the existing container named 'auth-api'
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command \
+            "kubectl set image deployment/$dep auth-api=${img} -n $ns"
+
+          # 3) ENV VARS (set individually; safe to repeat)
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep MONGO_URI='$(MONGO_URI)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep SENDGRID_API_KEY='$(SENDGRID_API_KEY)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep SENDGRID_SENDER_EMAIL='$(SENDGRID_SENDER_EMAIL)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep PORT='$(PORT)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep VERIFICATION_TOKEN_SECRET='$(VERIFICATION_TOKEN_SECRET)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep NODE_ENV='$(NODE_ENV)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep ACCESS_TOKEN_SECRET='$(ACCESS_TOKEN_SECRET)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep REFRESH_TOKEN_SECRET='$(REFRESH_TOKEN_SECRET)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep ACCESS_TOKEN_EXPIRY='$(ACCESS_TOKEN_EXPIRY)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep REFRESH_TOKEN_EXPIRY='$(REFRESH_TOKEN_EXPIRY)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep ADMIN_1_EMAIL='$(ADMIN_1_EMAIL)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep ADMIN_1_PASSWORD='$(ADMIN_1_PASSWORD)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep ADMIN_2_EMAIL='$(ADMIN_2_EMAIL)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep ADMIN_2_PASSWORD='$(ADMIN_2_PASSWORD)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep ADMIN_3_EMAIL='$(ADMIN_3_EMAIL)' -n $ns --overwrite=true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl set env deploy/$dep ADMIN_3_PASSWORD='$(ADMIN_3_PASSWORD)' -n $ns --overwrite=true"
+
+          # 4) Make service ClusterIP (patch if LB, create if missing)
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command \
+            "kubectl get svc $svc -n $ns -o jsonpath='{.spec.type}' | grep -qi LoadBalancer && kubectl patch svc $svc -n $ns -p '{\"spec\":{\"type\":\"ClusterIP\"}}' || true"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command \
+            "kubectl get svc $svc -n $ns >/dev/null 2>&1 || kubectl expose deploy/$dep -n $ns --name=$svc --type=ClusterIP --port 3000 --target-port 3000"
+
+          # 5) Rollout + show
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command "kubectl rollout restart deploy/$dep -n $ns"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command \
+            "kubectl rollout status deploy/$dep -n $ns --timeout=180s || echo rollout-may-still-be-progressing"
+          az aks command invoke -g "$(resourceGroup)" -n "$(aksCluster)" --command \
+            "kubectl get deploy/$dep svc/$svc -n $ns -o wide"
+      env:
+        subscriptionId: $(subscriptionId)
+        resourceGroup: $(resourceGroup)
+        aksCluster: $(aksCluster)
+        k8sNamespace: $(k8sNamespace)
+        deploymentName: $(deploymentName)
+        serviceName: $(serviceName)
+        # backend secrets (already defined as pipeline vars)
+        MONGO_URI: $(MONGO_URI)
+        SENDGRID_API_KEY: $(SENDGRID_API_KEY)
+        SENDGRID_SENDER_EMAIL: $(SENDGRID_SENDER_EMAIL)
+        PORT: $(PORT)
+        VERIFICATION_TOKEN_SECRET: $(VERIFICATION_TOKEN_SECRET)
+        NODE_ENV: $(NODE_ENV)
+        ACCESS_TOKEN_SECRET: $(ACCESS_TOKEN_SECRET)
+        REFRESH_TOKEN_SECRET: $(REFRESH_TOKEN_SECRET)
+        ACCESS_TOKEN_EXPIRY: $(ACCESS_TOKEN_EXPIRY)
+        REFRESH_TOKEN_EXPIRY: $(REFRESH_TOKEN_EXPIRY)
+        ADMIN_1_EMAIL: $(ADMIN_1_EMAIL)
+        ADMIN_1_PASSWORD: $(ADMIN_1_PASSWORD)
+        ADMIN_2_EMAIL: $(ADMIN_2_EMAIL)
+        ADMIN_2_PASSWORD: $(ADMIN_2_PASSWORD)
+        ADMIN_3_EMAIL: $(ADMIN_3_EMAIL)
+        ADMIN_3_PASSWORD: $(ADMIN_3_PASSWORD)

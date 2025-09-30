@@ -1,0 +1,11 @@
+node_modules/
+.eslintrc.json
+.gitignore
+README.md
+.prettierrc
+.Dockerignore
+.env
+.git/
+.idea/
+docker-lock.json
+# Docker build process = Take build context → Send to Docker → Follow Dockerfile steps.

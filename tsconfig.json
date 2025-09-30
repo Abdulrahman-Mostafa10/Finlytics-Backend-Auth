@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "inlineSources": true,
+    "baseUrl": "./",
+    "paths": {
+      "@src/*": ["src/*"],
+      "@utils/*": ["src/utils/*"],
+      "@config/*": ["src/config/*"],
+      "@moduleControllers/*": ["src/modules/*"],
+      "@errors/*": ["src/handlers/*"],
+      "@moduleroutes/*": ["src/routes/*"],
+      "@services/*": ["src/services/*"],
+      "@tests/*": ["src/tests/*"]
+    },
+    "allowJs": false,
+    "checkJs": false,
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo",
+    "preserveConstEnums": true
+  },
+  "include": ["src/**/*", "src/modules"],
+  "exclude": ["node_modules", "dist", "jest.config.js"],
+  "typedocOptions": {
+    "entryPoints": ["src/app.ts"]
+  }
+}

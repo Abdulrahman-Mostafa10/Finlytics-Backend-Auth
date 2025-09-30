@@ -1,1 +1,1 @@
-# Finlytics-Backend-Auth
+# Backend-Auth
