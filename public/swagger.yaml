@@ -1,0 +1,1809 @@
+openapi: 3.0.3
+info:
+  title: User Authentication API
+  version: 1.0.0
+  description: |
+    # User Authentication API Documentation
+    
+    This API provides complete user authentication with email verification flow and JWT-based authentication.
+    
+    ## 🔐 How to Use Authentication in Swagger
+    
+    ### **Step 1: Get Your Tokens**
+    1. Use the `/login` endpoint to get `accessToken` and `refreshToken`
+    2. Copy both tokens from the response
+    
+    ### **Step 2: Authorize Your Requests**
+    1. Click the 🔒 **Authorize** button at the top of this page
+    2. You'll see two authentication options:
+       - **BearerAuth**: For endpoints requiring access tokens
+       - **BearerRefreshAuth**: For the refresh token endpoint
+    3. Enter your token in the appropriate field (without "Bearer " prefix)
+    4. Click "Authorize"
+    
+    ### **Step 3: Use Protected Endpoints**
+    - Once authorized, you can use any protected endpoint
+    - Swagger automatically includes your token in the request headers
+    - No need to manually add Authorization headers
+    
+    ## 🔐 Authentication Flow Overview
+    
+    ### **Signup Process (Email Verification Required):**
+    1. **Send Verification Code** → Send 6-digit code to email
+    2. **Verify Email** → Verify code (expires in 15 minutes)
+    3. **Sign Up** → Create account with verified email
+    
+    ### **Authentication Process:**
+    4. **Login** → Get JWT access token + refresh token
+    5. **Refresh Token** → Get new access token when expired
+    
+         ## 🛡️ Security Features
+     - Email verification required for signup
+     - JWT tokens with short expiry (15 minutes)
+     - Stateless refresh tokens (no server storage)
+     - Password requirements (uppercase, lowercase, special chars)
+     - Admin whitelist authentication
+    
+    ## 📝 Validation Rules
+    - **Email**: Valid email format required
+    - **Names**: 2-50 characters
+    - **Password**: Min 8 chars, uppercase + lowercase + special char
+    - **Verification Code**: 6-digit numeric code
+
+servers:
+  - url: http://localhost:3000
+    description: Local Development Server
+  - url: https://finlytics.uaenorth.cloudapp.azure.com/api/
+    description: Production Server
+
+paths:
+  /v1/users/send-verification-code:
+    post:
+      tags:
+        - Email Verification
+      summary: "Send verification code to email"
+      description: |
+        Sends a 6-digit verification code to the provided email address.
+        
+        **Important Notes:**
+        - Code expires in 15 minutes
+        - If email already has a verification record, it will be updated
+        - Code is sent via SendGrid email service
+        - This is step 1 of the signup process
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "john.doe@example.com"
+                  description: "Valid email address to send verification code to"
+            examples:
+              valid_email:
+                summary: "Valid email request"
+                value:
+                  email: "john.doe@example.com"
+      responses:
+        '200':
+          description: "Verification code sent successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Verification challenge sent successfully."
+                  challengeToken:
+                    type: string
+                    description: "JWT token containing challenge information"
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  expiresIn:
+                    type: number
+                    description: "Expiration time in seconds"
+                    example: 900
+              examples:
+                success:
+                  summary: "Success response"
+                  value:
+                    message: "Verification challenge sent successfully."
+                    challengeToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    expiresIn: 900
+        '400':
+          description: "Invalid email format"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_email:
+                  summary: "Invalid email format"
+                  value:
+                    success: false
+                    message: "Please provide a valid email address"
+        '500':
+          description: "Internal server error or email service error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/users/verify:
+    post:
+      tags:
+        - Email Verification
+      summary: "Verify email with code"
+      description: |
+        Verifies an email address using the 6-digit code sent via email.
+        
+        **Important Notes:**
+        - Code expires in 15 minutes
+        - Requires challengeToken from send-verification-code response
+        - This is step 2 of the signup process
+        - Returns verificationToken needed for signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - code
+                - challengeToken
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "john.doe@example.com"
+                  description: "Email address to verify"
+                code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+                  example: "123456"
+                  description: "6-digit verification code from email"
+                challengeToken:
+                  type: string
+                  example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  description: "JWT token from send-verification-code response"
+            examples:
+              valid_verification:
+                summary: "Valid verification request"
+                value:
+                  email: "john.doe@example.com"
+                  code: "123456"
+                  challengeToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      responses:
+        '200':
+          description: "Email verification successful"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Email successfully verified."
+                  verificationId:
+                    type: string
+                    description: "Verification record ID"
+                    example: "507f1f77bcf86cd799439011"
+                  verificationToken:
+                    type: string
+                    description: "JWT token required for signup"
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              examples:
+                success:
+                  summary: "Verification successful"
+                  value:
+                    verified: true
+                    message: "Email successfully verified."
+                    verificationId: "507f1f77bcf86cd799439011"
+                    verificationToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        '400':
+          description: "Invalid verification code, expired code, or missing fields"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_code:
+                  summary: "Invalid verification code"
+                  value:
+                    success: false
+                    message: "Invalid verification code"
+                expired_code:
+                  summary: "Expired verification code"
+                  value:
+                    success: false
+                    message: "Verification code has expired"
+        '404':
+          description: "Verification record not found"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/users/signup:
+    post:
+      tags:
+        - User Registration
+      summary: "Sign up a new user"
+      description: |
+        Creates a new user account. **Email must be verified first** using the verification flow.
+        
+        **Prerequisites:**
+        - Email must be verified via /verify endpoint
+        - verificationToken from /verify response required
+        
+        **Password Requirements:**
+        - Minimum 8 characters
+        - At least 1 uppercase letter
+        - At least 1 lowercase letter
+        - At least 1 special character (!@#$%^&*)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+                - verificationToken
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "john.doe@example.com"
+                  description: "Email address (must be verified first)"
+                password:
+                  type: string
+                  minLength: 8
+                  pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*])[a-zA-Z0-9!@#$%^&*]{8,}$'
+                  example: "MySecurePass123!"
+                  description: "Password (min 8 chars, uppercase + lowercase + special char)"
+                verificationToken:
+                  type: string
+                  example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  description: "JWT token from /verify response"
+            examples:
+              valid_signup:
+                summary: "Valid signup request"
+                value:
+                  email: "john.doe@example.com"
+                  password: "MySecurePass123!"
+                  verificationToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      responses:
+        '201':
+          description: "User created successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Account created successfully with verified email"
+                  user:
+                    $ref: '#/components/schemas/User'
+              examples:
+                success:
+                  summary: "User created successfully"
+                  value:
+                    message: "Account created successfully with verified email"
+                    user:
+                      id: "507f1f77bcf86cd799439011"
+                      email: "john.doe@example.com"
+                      isDeleted: false
+                      createdAt: "2024-01-15T10:30:00.000Z"
+                      updatedAt: "2024-01-15T10:30:00.000Z"
+        '400':
+          description: "Invalid input, email not verified, or user already exists"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_password:
+                  summary: "Invalid password format"
+                  value:
+                    success: false
+                    message: "Password must include at least one uppercase letter, one lowercase letter, and one special character (!@#$%^&*)"
+                email_not_verified:
+                  summary: "Email not verified"
+                  value:
+                    success: false
+                    message: "Email verification required"
+                user_exists:
+                  summary: "User already exists"
+                  value:
+                    success: false
+                    message: "User with this email already exists"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/users/signup-completion:
+    post:
+      tags:
+        - User Registration
+      summary: "Complete user profile information"
+      description: |
+        Completes the user profile by adding additional personal information after initial signup.
+        
+        **Prerequisites:**
+        - User must be signed up 
+        - Email must be verified
+        
+        **Profile Information:**
+        - First/last name, date of birth, marital status
+        - Profession, gender, and address details
+        - All fields are required for profile completion
+        
+        **Validation Rules:**
+        - **firstName**: 2-50 characters
+        - **lastName**: 2-50 characters
+        - **maritalStatus**: Must be one of: single, married, divorced, widowed
+        - **profession**: 2-100 characters
+        - **gender**: Must be one of: male, female, other
+        - **address**: 5-200 characters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - dateOfBirth
+                - firstName
+                - lastName
+                - maritalStatus
+                - profession
+                - gender
+                - address
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "john.doe@example.com"
+                  description: "User's email address (must match existing account)"
+                dateOfBirth:
+                  type: string
+                  format: date
+                  example: "1990-05-15"
+                  description: "User's date of birth (YYYY-MM-DD format)"
+                firstName:
+                  type: string
+                  minLength: 2
+                  maxLength: 50
+                  pattern: '^[a-zA-Z\s]+$'
+                  example: "John"
+                  description: "User's first name (2-50 characters, letters only)"
+                lastName:
+                  type: string
+                  minLength: 2
+                  maxLength: 50
+                  pattern: '^[a-zA-Z\s]+$'
+                  example: "Doe"
+                  description: "User's last name (2-50 characters, letters only)"
+                maritalStatus:
+                  type: string
+                  enum: [single, married, divorced, widowed]
+                  example: "single"
+                  description: "Current marital status"
+                profession:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                  example: "Software Engineer"
+                  description: "User's profession or occupation (2-100 characters)"
+                gender:
+                  type: string
+                  enum: [male, female, other]
+                  example: "male"
+                  description: "User's gender identity"
+                address:
+                  type: string
+                  minLength: 5
+                  maxLength: 200
+                  example: "123 Main Street, Apt 4B, New York, NY 10001"
+                  description: "Complete residential address (5-200 characters)"
+            examples:
+              complete_profile:
+                summary: "Complete profile information"
+                value:
+                  email: "john.doe@example.com"
+                  dateOfBirth: "1990-05-15"
+                  firstName: "John"
+                  lastName: "Doe"
+                  maritalStatus: "single"
+                  profession: "Software Engineer"
+                  gender: "male"
+                  address: "123 Main Street, Apt 4B, New York, NY 10001"
+      responses:
+        '200':
+          description: "Profile completed successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                    description: "Request success status"
+                  message:
+                    type: string
+                    example: "User profile completed successfully"
+                    description: "Success message"
+                  user:
+                    $ref: '#/components/schemas/UserProfile'
+              examples:
+                success:
+                  summary: "Profile completed successfully"
+                  value:
+                    success: true
+                    message: "User profile completed successfully"
+                    user:
+                      id: "507f1f77bcf86cd799439011"
+                      firstName: "John"
+                      lastName: "Doe"
+                      email: "john.doe@example.com"
+                      dateOfBirth: "1990-05-15"
+                      maritalStatus: "single"
+                      profession: "Software Engineer"
+                      gender: "male"
+                      address: "123 Main Street, Apt 4B, New York, NY 10001"
+        '400':
+          description: "Invalid input data or missing required fields"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing_fields:
+                  summary: "Missing required fields"
+                  value:
+                    success: false
+                    message: "All profile fields are required"
+                invalid_date:
+                  summary: "Invalid date format"
+                  value:
+                    success: false
+                    message: "Date of birth must be a valid date"
+                invalid_national_id:
+                  summary: "Invalid national ID name"
+                  value:
+                    success: false
+                    message: "National ID name must be 2-100 characters long"
+                invalid_marital_status:
+                  summary: "Invalid marital status"
+                  value:
+                    success: false
+                    message: "Marital status must be one of: single, married, divorced, widowed"
+                invalid_profession:
+                  summary: "Invalid profession"
+                  value:
+                    success: false
+                    message: "Profession must be 2-100 characters long"
+                invalid_gender:
+                  summary: "Invalid gender"
+                  value:
+                    success: false
+                    message: "Gender must be one of: male, female, other"
+                invalid_address:
+                  summary: "Invalid address"
+                  value:
+                    success: false
+                    message: "Address must be 5-200 characters long"
+        '404':
+          description: "User not found"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                user_not_found:
+                  summary: "User not found"
+                  value:
+                    success: false
+                    message: "User not found"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                internal_error:
+                  summary: "Internal server error"
+                  value:
+                    success: false
+                    message: "Internal server error during profile completion"
+  
+  /v1/users/ocr/national-id:
+    post:
+      tags:
+        - User Registration
+      summary: "Extract National ID information from OCR"
+      description: |
+        Extracts user details from the Egyptian National ID card using OCR.  
+
+        **Prerequisites:**
+        - Both front and back images of the National ID must be provided in Base64 format  
+
+        **OCR Output Includes:**
+        - First name
+        - Last name
+        - Date of birth
+        - Gender
+        - Address
+        - Profession
+        - Marital status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - front_base64
+                - back_base64
+              properties:
+                front_base64:
+                  type: string
+                  format: byte
+                  description: "Front side of the National ID card in Base64 format"
+                  example: "/9j/4AAQSkZJRgABAQAAAQABAAD..."
+                back_base64:
+                  type: string
+                  format: byte
+                  description: "Back side of the National ID card in Base64 format"
+                  example: "/9j/4AAQSkZJRgABAQAAAQABAAD..."
+            examples:
+              valid_request:
+                summary: "Valid National ID OCR request"
+                value:
+                  front_base64: "/9j/4AAQSkZJRgABAQAAAQABAAD..."
+                  back_base64: "/9j/4AAQSkZJRgABAQAAAQABAAD..."
+      responses:
+        '200':
+          description: "National ID data extracted successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                    description: "Request success status"
+                  data:
+                    type: object
+                    properties:
+                      first_name:
+                        type: string
+                        example: "Mostafa"
+                      last_name:
+                        type: string
+                        example: "El-Badrawi"
+                      date_of_birth:
+                        type: string
+                        example: "2005-01-20"
+                        description: "Date of birth (DD-MM-YYYY format from OCR)"
+                      gender:
+                        type: string
+                        enum: [male, female]
+                        example: "male"
+                      address:
+                        type: string
+                        example: "415 Madinet El-Mostaqbal, Al-Shorouk, Cairo"
+                      profession:
+                        type: string
+                        example: "Student"
+                      marital_status:
+                        type: string
+                        enum: [single, married, divorced, widowed]
+                        example: "single"
+                  message:
+                    type: string
+                    example: "National ID data extracted successfully"
+              examples:
+                success:
+                  summary: "Successful OCR extraction"
+                  value:
+                    success: true
+                    data:
+                      first_name: "Mostafa"
+                      last_name: "El-Badrawi"
+                      date_of_birth: "2005-01-20"
+                      gender: "male"
+                      address: "415 Madinet El-Mostaqbal, Al-Shorouk, Cairo"
+                      profession: "Student"
+                      marital_status: "single"
+                    message: "National ID data extracted successfully"
+        '400':
+          description: "Invalid input or OCR parsing error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_input:
+                  summary: "Missing Base64 image"
+                  value:
+                    success: false
+                    message: "Both front_base64 and back_base64 are required"
+                ocr_failed:
+                  summary: "OCR parsing failed"
+                  value:
+                    success: false
+                    message: "Failed to extract ID data from images"
+          description: "Unauthorized - Missing or invalid JWT token"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unauthorized:
+                  summary: "JWT missing or invalid"
+                  value:
+                    success: false
+                    message: "Unauthorized: Invalid or missing token"
+        '500':
+          description: "Internal server error during OCR processing"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                internal_error:
+                  summary: "Internal server error"
+
+  /v1/users/login:
+    post:
+      tags:
+        - Authentication
+      summary: "Login user or admin"
+      description: |
+        Authenticates user or admin credentials and returns JWT tokens.
+        
+        **Authentication Types:**
+        - **Regular User**: Uses email/password from database
+        - **Admin User**: Uses whitelisted admin credentials
+        
+                 **Response:**
+         - Access token in response body (15 min expiry)
+         - Refresh token in response body (7 days expiry)
+         
+                  **Security:**
+          - Refresh token should be stored securely by the client
+          - Access token should be stored securely by the client
+          
+          **Token Handling:**
+          - Both tokens are returned in the response body
+          - Client is responsible for storing tokens securely
+          - Mobile apps can store refresh tokens in secure storage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "john.doe@example.com"
+                  description: "Email address (user) or admin email"
+                password:
+                  type: string
+                  example: "MySecurePass123!"
+                  description: "User password or admin password"
+            examples:
+              user_login:
+                summary: "Regular user login"
+                value:
+                  email: "john.doe@example.com"
+                  password: "MySecurePass123!"
+              admin_login:
+                summary: "Admin login"
+                value:
+                  email: "admin@yourapp.com"
+                  password: "AdminPass123!"
+      responses:
+        '200':
+          description: "Login successful"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "User login successful"
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            example: "507f1f77bcf86cd799439011"
+                            description: "User ID (null for admin)"
+                          email:
+                            type: string
+                            example: "john.doe@example.com"
+                          firstName:
+                            type: string
+                            example: "John"
+                            description: "First name (null for admin)"
+                          lastName:
+                            type: string
+                            example: "Doe"
+                            description: "Last name (null for admin)"
+                          role:
+                            type: string
+                            enum: [user, admin]
+                            example: "user"
+                      accessToken:
+                        type: string
+                        description: "JWT access token (15 minutes expiry)"
+                        example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      refreshToken:
+                         type: string
+                         description: "JWT refresh token (7 days expiry)"
+                         example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              examples:
+                user_success:
+                  summary: "User login successful"
+                  value:
+                    success: true
+                    message: "User login successful"
+                    data:
+                      user:
+                        id: "507f1f77bcf86cd799439011"
+                        email: "john.doe@example.com"
+                        firstName: "John"
+                        lastName: "Doe"
+                        role: "user"
+                      accessToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                admin_success:
+                  summary: "Admin login successful"
+                  value:
+                    success: true
+                    message: "Admin login successful"
+                    data:
+                      user:
+                        email: "admin@yourapp.com"
+                        role: "admin"
+                      accessToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+          
+        '400':
+          description: "Email and password are required"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing_fields:
+                  summary: "Missing required fields"
+                  value:
+                    success: false
+                    message: "Email and password are required"
+        '401':
+          description: "Invalid credentials or login failed"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_credentials:
+                  summary: "Invalid credentials"
+                  value:
+                    success: false
+                    message: "Invalid email or password"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/users/refresh-token:
+    post:
+      tags:
+        - Authentication
+      summary: "Refresh access token"
+      description: |
+        Generates a new **access token** using the refresh token.
+        
+        **How to use:**
+        1. Click the 🔒 **Authorize** button at the top of this page
+        2. In the "BearerRefreshAuth" field, enter your refresh token (without "Bearer " prefix)
+        3. Click "Authorize" to save
+        4. Now you can use this endpoint - the token will be automatically included in the request
+        
+        **Note:** The refresh token must be valid and not expired. A new access token will be returned.
+      security:
+        - BearerRefreshAuth: []
+      responses:
+        "200":
+          description: "New access token issued successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                    description: "Request success status"
+                  message:
+                    type: string
+                    example: "Access token refreshed successfully"
+                    description: "Success message"
+                  accessToken:
+                    type: string
+                    description: "New JWT access token (15 minutes expiry)"
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImpvaG4uZG9lQGV4YW1wbGUuY29tIiwicm9sZSI6InVzZXIiLCJpYXQiOjE2MzQ1Njc4OTAsImV4cCI6MTYzNDU2ODc5MH0.Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8"
+              examples:
+                success:
+                  summary: "Token refreshed successfully"
+                  value:
+                    success: true
+                    message: "Access token refreshed successfully"
+                    accessToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImpvaG4uZG9lQGV4YW1wbGUuY29tIiwicm9sZSI6InVzZXIiLCJpYXQiOjE2MzQ1Njc4OTAsImV4cCI6MTYzNDU2ODc5MH0.Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8"
+        "401":
+          description: "Unauthorized - Invalid or missing refresh token"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing_token:
+                  summary: "Missing refresh token"
+                  value:
+                    success: false
+                    message: "Refresh token required"
+                invalid_token:
+                  summary: "Invalid refresh token"
+                  value:
+                    success: false
+                    message: "Invalid or expired refresh token"
+        "500":
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/users/request-reset-password:
+    post:
+      tags:
+        - Password Reset
+      summary: "Request password reset"
+      description: |
+        Sends a 6-character verification code to the user's email for password reset.
+        
+        **Important Notes:**
+        - Code expires in 15 minutes
+        - If email already has a reset record, the previous one will be marked as deleted
+        - Code is sent via SendGrid email service
+        - Admin emails are not allowed to request password reset
+        - Verification code is 6 characters (alphanumeric, uppercase)
+        
+        **Process:**
+        1. Generates a random 6-character verification code
+        2. Hashes the code for security
+        3. Creates or updates password reset record
+        4. Sends email with the verification code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "john.doe@example.com"
+                  description: "Email address to send password reset code to"
+            examples:
+              valid_email:
+                summary: "Valid email request"
+                value:
+                  email: "john.doe@example.com"
+      responses:
+        '200':
+          description: "Password reset code sent successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                    description: "Request success status"
+                  message:
+                    type: string
+                    example: "Password reset code has been sent to your email"
+                    description: "Success message"
+              examples:
+                success:
+                  summary: "Reset code sent successfully"
+                  value:
+                    success: true
+                    message: "Password reset code has been sent to your email"
+        '400':
+          description: "Invalid email format or admin email not allowed"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                admin_not_allowed:
+                  summary: "Admin email not allowed"
+                  value:
+                    success: false
+                    message: "password reset is not available"
+                invalid_email:
+                  summary: "Invalid email format"
+                  value:
+                    success: false
+                    message: "Please provide a valid email address"
+        '500':
+          description: "Internal server error or email service error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/users/reset-password:
+    post:
+      tags:
+        - Password Reset
+      summary: "Reset password with verification code"
+      description: |
+        Resets the user's password using the verification code sent to their email.
+        
+        **Important Notes:**
+        - Verification code expires in 15 minutes
+        - Code must match exactly (case-sensitive)
+        - New password must meet security requirements
+        - Old password reset record is marked as deleted after successful reset
+        - New Password must be not equal the Old password
+        
+        **Password Requirements:**
+        - Minimum 8 characters
+        - At least 1 uppercase letter
+        - At least 1 lowercase letter
+        - At least 1 special character (!@#$%^&*)
+        
+        **Process:**
+        1. Validates the verification code
+        2. Checks code expiration (15 minutes)
+        3. Hashes the new password
+        4. Updates user's password in database
+        5. Marks reset record as deleted
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - verificationCode
+                - newPassword
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "john.doe@example.com"
+                  description: "Email address associated with the reset request"
+                verificationCode:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+                  example: "ABC123"
+                  description: "6-character verification code from email (case-sensitive)"
+                newPassword:
+                  type: string
+                  minLength: 8
+                  pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*])[a-zA-Z0-9!@#$%^&*]{8,}$'
+                  example: "NewSecurePass123!"
+                  description: "New password (min 8 chars, uppercase + lowercase + special char)"
+            examples:
+              valid_reset:
+                summary: "Valid password reset request"
+                value:
+                  email: "john.doe@example.com"
+                  verificationCode: "ABC123"
+                  newPassword: "NewSecurePass123!"
+      responses:
+        '200':
+          description: "Password reset successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                    description: "Request success status"
+                  message:
+                    type: string
+                    example: "Password has been reset successfully"
+                    description: "Success message"
+              examples:
+                success:
+                  summary: "Password reset successful"
+                  value:
+                    success: true
+                    message: "Password has been reset successfully"
+        '400':
+          description: "Invalid verification code, expired code, or invalid password"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_code:
+                  summary: "Invalid verification code"
+                  value:
+                    success: false
+                    message: "Invalid verification code"
+                expired_code:
+                  summary: "Expired verification code"
+                  value:
+                    success: false
+                    message: "Verification code has expired"
+                invalid_password:
+                  summary: "Invalid password format"
+                  value:
+                    success: false
+                    message: "Password must include at least one uppercase letter, one lowercase letter, and one special character (!@#$%^&*)"
+        '404':
+          description: "Password reset record or user not found"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                record_not_found:
+                  summary: "Reset record not found"
+                  value:
+                    success: false
+                    message: "Invalid or expired verification code"
+                user_not_found:
+                  summary: "User not found"
+                  value:
+                    success: false
+                    message: "User not found"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/users/profile/{id}:
+    get:
+      tags:
+        - User Profile
+      summary: "Get user profile by ID"
+      description: |
+        Retrieves a user's profile information by their ID. This endpoint is publicly accessible and does not require authentication.
+        
+        **Public Access:**
+        - No authentication required
+        - Anyone can view any user's profile
+        - Sensitive information (password) is excluded
+        
+        **Profile Information:**
+        - Basic info: firstName, lastName, email
+        - Personal details: dateOfBirth, nationalIdName, maritalStatus
+        - Professional info: profession, gender, address
+        - Timestamps: createdAt, updatedAt
+        
+        **Note:** This follows a Facebook-like approach where user profiles are publicly viewable.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: "User ID to retrieve profile for"
+          schema:
+            type: string
+          example: "507f1f77bcf86cd799439011"
+      responses:
+        '200':
+          description: "User profile retrieved successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                    description: "Request success status"
+                  message:
+                    type: string
+                    example: "User profile retrieved successfully"
+                    description: "Success message"
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/UserProfile'
+              examples:
+                success:
+                  summary: "Profile retrieved successfully"
+                  value:
+                    success: true
+                    message: "User profile retrieved successfully"
+                    data:
+                      user:
+                        id: "507f1f77bcf86cd799439011"
+                        firstName: "John"
+                        lastName: "Doe"
+                        email: "john.doe@example.com"
+                        dateOfBirth: "1990-05-15"
+                        maritalStatus: "single"
+                        profession: "Software Engineer"
+                        gender: "male"
+                        address: "123 Main Street, Apt 4B, New York, NY 10001"
+                        profileImage: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                        createdAt: "2024-01-15T10:30:00.000Z"
+                        updatedAt: "2024-01-15T10:35:00.000Z"
+        '400':
+          description: "User ID is required"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing_id:
+                  summary: "Missing user ID"
+                  value:
+                    success: false
+                    message: "User ID is required"
+        '404':
+          description: "User not found"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                user_not_found:
+                  summary: "User not found"
+                  value:
+                    success: false
+                    message: "User not found"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/users/profile:
+    put:
+      tags:
+        - User Profile
+      summary: "Update user profile"
+      description: |
+        Allows authenticated users to update their profile information.
+        
+        **Authentication Required:**
+        - Valid JWT access token required
+        - Users can only update their own profile
+        
+        **Updatable Fields:**
+        - firstName: User's first name (2-50 characters, letters only)
+        - lastName: User's last name (2-50 characters, letters only)
+        - maritalStatus: Current marital status (single, married, divorced, widowed)
+        - profession: User's profession or occupation (2-100 characters)
+        
+        **Security:**
+        - Requires valid access token in Authorization header
+        - Token must contain valid userId
+        - Only the account owner can update their profile
+        - Email cannot be changed through this endpoint
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - firstName
+                - lastName
+                - maritalStatus
+                - profession
+              properties:
+                firstName:
+                  type: string
+                  minLength: 2
+                  maxLength: 50
+                  pattern: '^[a-zA-Z\s]+$'
+                  example: "John"
+                  description: "User's first name (2-50 characters, letters only)"
+                lastName:
+                  type: string
+                  minLength: 2
+                  maxLength: 50
+                  pattern: '^[a-zA-Z\s]+$'
+                  example: "Doe"
+                  description: "User's last name (2-50 characters, letters only)"
+                maritalStatus:
+                  type: string
+                  enum: [single, married, divorced, widowed]
+                  example: "married"
+                  description: "Current marital status"
+                profession:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                  example: "Senior Software Engineer"
+                  description: "User's profession or occupation"
+            examples:
+              update_profile:
+                summary: "Update profile information"
+                value:
+                  firstName: "John"
+                  lastName: "Doe"
+                  maritalStatus: "married"
+                  profession: "Senior Software Engineer"
+      responses:
+        '200':
+          description: "Profile updated successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                    description: "Request success status"
+                  message:
+                    type: string
+                    example: "Profile updated successfully"
+                    description: "Success message"
+              examples:
+                success:
+                  summary: "Profile updated successfully"
+                  value:
+                    success: true
+                    message: "Profile updated successfully"
+        '400':
+          description: "Invalid input data or validation errors"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_name:
+                  summary: "Invalid name format"
+                  value:
+                    success: false
+                    message: "First name and last name must be 2-50 characters and contain only letters"
+                invalid_marital_status:
+                  summary: "Invalid marital status"
+                  value:
+                    success: false
+                    message: "Marital status must be one of: single, married, divorced, widowed"
+                invalid_profession:
+                  summary: "Invalid profession"
+                  value:
+                    success: false
+                    message: "Profession must be 2-100 characters"
+        '401':
+          description: "Authentication required"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unauthorized:
+                  summary: "Authentication required"
+                  value:
+                    success: false
+                    message: "Authentication required"
+        '404':
+          description: "User not found"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                user_not_found:
+                  summary: "User not found"
+                  value:
+                    success: false
+                    message: "User not found"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - User Profile
+      summary: "Delete user account"
+      description: |
+        Allows authenticated users to delete (deactivate) their own account.
+        
+        **Authentication Required:**
+        - Valid JWT access token required
+        - Users can only delete their own account
+        
+        **Process:**
+        - Performs soft delete (sets isDeleted: true)
+        - Account data is preserved but marked as inactive
+        - User will no longer be able to login
+        
+        **Security:**
+        - Requires valid access token in Authorization header
+        - Token must contain valid userId
+        - Only the account owner can delete their account
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: "Account deleted successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                    description: "Request success status"
+                  message:
+                    type: string
+                    example: "Account deleted successfully"
+                    description: "Success message"
+              examples:
+                success:
+                  summary: "Account deleted successfully"
+                  value:
+                    success: true
+                    message: "Account deleted successfully"
+        '400':
+          description: "Invalid request or account already deleted"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                already_deleted:
+                  summary: "Account already deleted"
+                  value:
+                    success: false
+                    message: "Account is already deleted"
+                user_not_found:
+                  summary: "User not found"
+                  value:
+                    success: false
+                    message: "User not found"
+        '401':
+          description: "Authentication required"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unauthorized:
+                  summary: "Authentication required"
+                  value:
+                    success: false
+                    message: "Authentication required"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/users/profile/upload-image:
+    put:
+      tags:
+        - User Profile
+      summary: "Upload profile image"
+      description: |
+        Allows authenticated users to upload a profile image as a base64 encoded string.
+        
+        **Authentication Required:**
+        - Valid JWT access token required
+        - Users can only upload their own profile image
+        
+        **Image Requirements:**
+        - Must be base64 encoded image data
+        - Supported formats: PNG, JPEG, JPG, GIF, WebP
+        - Maximum file size: 5MB
+        - Format: `data:image/(format);base64,(base64-data)`
+        
+        **Validation:**
+        - Joi validator ensures proper base64 format
+        - File size validation (max 5MB)
+        - Image format validation
+        - Base64 integrity check
+        
+        **Security:**
+        - Requires valid access token in Authorization header
+        - Token must contain valid userId
+        - Only the account owner can upload their profile image
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileImage
+              properties:
+                profileImage:
+                  type: string
+                  example: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                  description: "Base64 encoded image data with MIME type prefix"
+            examples:
+              upload_png:
+                summary: "Upload PNG image"
+                value:
+                  profileImage: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+              upload_jpeg:
+                summary: "Upload JPEG image"
+                value:
+                  profileImage: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwA/8A8A"
+      responses:
+        '200':
+          description: "Profile image uploaded successfully"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                    description: "Request success status"
+                  message:
+                    type: string
+                    example: "Profile image updated successfully"
+                    description: "Success message"
+              examples:
+                success:
+                  summary: "Image uploaded successfully"
+                  value:
+                    success: true
+                    message: "Profile image updated successfully"
+        '400':
+          description: "Invalid image data or validation errors"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_format:
+                  summary: "Invalid image format"
+                  value:
+                    success: false
+                    message: "Profile image must be a valid base64 encoded image (PNG, JPEG, JPG, GIF, or WebP)"
+                file_too_large:
+                  summary: "File too large"
+                  value:
+                    success: false
+                    message: "Profile image must not exceed 5MB"
+                invalid_base64:
+                  summary: "Invalid base64 data"
+                  value:
+                    success: false
+                    message: "Profile image must be a valid base64 encoded image (PNG, JPEG, JPG, GIF, or WebP)"
+        '401':
+          description: "Authentication required"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unauthorized:
+                  summary: "Authentication required"
+                  value:
+                    success: false
+                    message: "Authentication required"
+        '404':
+          description: "User not found"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                user_not_found:
+                  summary: "User not found"
+                  value:
+                    success: false
+                    message: "User not found"
+        '413':
+          description: "Request entity too large"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                    description: "Request success status"
+                  message:
+                    type: string
+                    example: "Request entity too large. Maximum file size is 5MB."
+                    description: "Error message"
+                  error:
+                    type: string
+                    example: "PAYLOAD_TOO_LARGE"
+                    description: "Error code"
+              examples:
+                payload_too_large:
+                  summary: "File size exceeds limit"
+                  value:
+                    success: false
+                    message: "Request entity too large. Maximum file size is 5MB."
+                    error: "PAYLOAD_TOO_LARGE"
+        '500':
+          description: "Internal server error"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "507f1f77bcf86cd799439011"
+          description: "Unique user identifier"
+        firstName:
+          type: string
+          example: "John"
+          description: "User's first name"
+        lastName:
+          type: string
+          example: "Doe"
+          description: "User's last name"
+        email:
+          type: string
+          format: email
+          example: "john.doe@example.com"
+          description: "User's email address"
+        isDeleted:
+          type: boolean
+          example: false
+          description: "Soft delete flag"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00.000Z"
+          description: "Account creation timestamp"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00.000Z"
+          description: "Last update timestamp"
+      required:
+        - firstName
+        - lastName
+        - email
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "507f1f77bcf86cd799439011"
+          description: "Unique user identifier"
+        firstName:
+          type: string
+          example: "John"
+          description: "User's first name"
+        lastName:
+          type: string
+          example: "Doe"
+          description: "User's last name"
+        email:
+          type: string
+          format: email
+          example: "john.doe@example.com"
+          description: "User's email address"
+        dateOfBirth:
+          type: string
+          format: date
+          example: "1990-05-15"
+          description: "User's date of birth"
+        maritalStatus:
+          type: string
+          enum: [single, married, divorced, widowed]
+          example: "single"
+          description: "Current marital status"
+        profession:
+          type: string
+          example: "Software Engineer"
+          description: "User's profession or occupation"
+        gender:
+          type: string
+          enum: [male, female, other]
+          example: "male"
+          description: "User's gender identity"
+        address:
+          type: string
+          example: "123 Main Street, Apt 4B, New York, NY 10001"
+          description: "Complete residential address"
+        profileImage:
+          type: string
+          example: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+          description: "Base64 encoded profile image (optional)"
+        isDeleted:
+          type: boolean
+          example: false
+          description: "Soft delete flag"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00.000Z"
+          description: "Account creation timestamp"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:35:00.000Z"
+          description: "Last update timestamp"
+      required:
+        - firstName
+        - lastName
+        - email
+        - dateOfBirth
+        - maritalStatus
+        - profession
+        - gender
+        - address
+
+    UserVerification:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "507f1f77bcf86cd799439011"
+          description: "Verification record ID"
+        email:
+          type: string
+          format: email
+          example: "john.doe@example.com"
+          description: "Email being verified"
+        verificationCode:
+          type: string
+          example: "123456"
+          description: "6-digit verification code"
+        isVerified:
+          type: boolean
+          example: false
+          description: "Verification status"
+        isDeleted:
+          type: boolean
+          example: false
+          description: "Soft delete flag"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00.000Z"
+          description: "Verification creation timestamp"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00.000Z"
+          description: "Last update timestamp"
+      required:
+        - email
+        - verificationCode
+        - isVerified
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+          description: "Request success status"
+        message:
+          type: string
+          example: "Error message"
+          description: "Error description"
+      required:
+        - success
+        - message
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        **Access Token Authentication**
+        
+        For endpoints that require user authentication:
+        1. Click the 🔒 **Authorize** button at the top
+        2. Enter your access token in the "BearerAuth" field (without "Bearer " prefix)
+        3. Click "Authorize"
+        
+        The token will be automatically included in all requests that use this security scheme.
+
+    BearerRefreshAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        **Refresh Token Authentication**
+        
+        For the refresh token endpoint:
+        1. Click the 🔒 **Authorize** button at the top
+        2. Enter your refresh token in the "BearerRefreshAuth" field (without "Bearer " prefix)
+        3. Click "Authorize"
+        
+        This is used specifically for refreshing access tokens.
+
+
+tags:
+  - name: Email Verification
+    description: "Email verification flow for user signup"
+  - name: User Registration
+    description: "User account creation"
+  - name: Authentication
+    description: "Login and token management"
+  - name: Password Reset
+    description: "Password reset functionality for existing users"
+  - name: User Profile
+    description: "User profile management and viewing"
